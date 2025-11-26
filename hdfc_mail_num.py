@@ -41,12 +41,12 @@ def get_result(application_number="", email="", mobile=""):
     try:
         response = requests.post(RESULT_URL, headers=headers, json=payload)
         if response.status_code == 401:
-            print(f"❌ Unauthorized for {mobile}. Token may have expired.")
+            print(f"Unauthorized for {mobile}. Token may have expired.")
             return None
         response.raise_for_status()
         return response.json()
     except requests.RequestException as e:
-        print(f"❌ Error fetching result for {mobile}: {e}")
+        print(f"Error fetching result for {mobile}: {e}")
         return None
 
 # --- Step 3: Save result to JSON file ---
@@ -59,7 +59,7 @@ def save_result(data):
         "logoFid": None,
         "awardees": []
     }:
-        print("⏭️ Skipped empty result")
+        print("Skipped empty result")
         return
 
     all_data = []
@@ -71,14 +71,14 @@ def save_result(data):
                 if content:
                     all_data = json.loads(content)
         except json.JSONDecodeError:
-            print(f"⚠️ {OUTPUT_FILE} is corrupted. Overwriting.")
+            print(f"{OUTPUT_FILE} is corrupted. Overwriting.")
 
     # Append new data and save
     all_data.append(data)
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(all_data, f, indent=2, ensure_ascii=False)
 
-    print("💾 Saved result")
+    print("Saved result")
 
 # --- Main ---
 if __name__ == "__main__":
