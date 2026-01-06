@@ -19,7 +19,7 @@ USER_SEARCH_URL = "https://sitareuniv.digiicampus.com/rest/users/search/all"
 CLOUD_FRONT_BASE = "https://dli6r6oycdqaz.cloudfront.net/"
 DEFAULT_PROFILE_IMG = "https://d1reij146f0v46.cloudfront.net/version-1757958587/images/profile.png"
 
-# ================= TOKEN HELPERS =================
+# ================= TOKEN =================
 def get_auth_token():
     return os.getenv("AUTH_TOKEN")
 
@@ -43,17 +43,20 @@ def convert_photo_url(photo):
 def set_token():
     data = request.get_json()
     token = data.get("token", "").strip()
-
     if not token:
-        return jsonify({"error": "Token missing"}), 400
+        return jsonify({"error": "Token is missing"}), 400
 
     set_auth_token(token)
-    return jsonify({"message": "Auth token saved successfully"})
+    return jsonify({"message": "Token set successfully"})
 
-# -------------------------------------------------
+# --------------------------------------------------
 
 @app.route("/search_users", methods=["GET"])
 def search_users():
+    """
+    OLD BEHAVIOR (frontend compatible)
+    Returns: list of users
+    """
     key = request.args.get("key", "").strip()
     if not key:
         return jsonify({"error": "Missing search key"}), 400
@@ -62,79 +65,100 @@ def search_users():
     if not token:
         return jsonify({"error": "Auth token not set"}), 401
 
-    headers = {
-        "Auth-Token": token,
-        "User-Agent": "Mozilla/5.0"
-    }
+    headers = {"Auth-Token": token, "User-Agent": "Mozilla/5.0"}
 
     try:
         r = requests.get(USER_SEARCH_URL, params={"key": key}, headers=headers)
 
         if r.status_code in (401, 403):
-            return jsonify({"error": "Invalid or expired token"}), 403
+            return jsonify({"error": "Invalid or expired Auth token"}), 403
 
         r.raise_for_status()
         users = r.json()
 
-        # ---- structured output ----
-        result = {
-            "phones": [],
-            "registration_ids": [],
-            "emails": [],
-            "names": [],
-            "ukids": [],
-            "user_types": [],
-            "users": []
-        }
+        filtered_users = []
+        phones, regs = [], []
 
         for u in users:
             phone = u.get("phone")
             if phone:
-                result["phones"].append(phone[3:] if phone.startswith("91-") else phone)
+                phones.append(phone[3:] if phone.startswith("91-") else phone)
 
             if u.get("registrationId"):
-                result["registration_ids"].append(u["registrationId"])
+                regs.append(str(u["registrationId"]))
 
-            if u.get("email"):
-                result["emails"].append(u["email"])
-
-            if u.get("name"):
-                result["names"].append(u["name"])
-
-            if u.get("ukid"):
-                result["ukids"].append(u["ukid"])
-
-            if u.get("userType"):
-                result["user_types"].append(u["userType"])
-
-            result["users"].append({
+            filtered_users.append({
                 "name": u.get("name"),
                 "email": u.get("email"),
                 "registrationId": u.get("registrationId"),
-                "phone": phone,
+                "photo": convert_photo_url(u.get("photo")),
                 "ukid": u.get("ukid"),
                 "userType": u.get("userType"),
-                "photo": convert_photo_url(u.get("photo"))
+                "phone": phone
             })
 
-        # ---- save files ----
+        # save files for download
         base = os.path.join(OUTPUT_DIR, key)
-
         with open(base + "_phones.txt", "w") as f:
-            f.write("\n".join(result["phones"]))
-
+            f.write("\n".join(phones))
         with open(base + "_registration_ids.txt", "w") as f:
-            f.write("\n".join(map(str, result["registration_ids"])))
-
+            f.write("\n".join(regs))
         with open(base + "_full.json", "w") as f:
-            json.dump(result["users"], f, indent=2)
+            json.dump(filtered_users, f, indent=2)
 
-        return jsonify(result)
+        return jsonify(filtered_users)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# -------------------------------------------------
+# --------------------------------------------------
+
+@app.route("/search_users_full", methods=["GET"])
+def search_users_full():
+    """
+    NEW STRUCTURED OUTPUT
+    """
+    key = request.args.get("key", "").strip()
+    if not key:
+        return jsonify({"error": "Missing search key"}), 400
+
+    token = get_auth_token()
+    if not token:
+        return jsonify({"error": "Auth token not set"}), 401
+
+    headers = {"Auth-Token": token, "User-Agent": "Mozilla/5.0"}
+    r = requests.get(USER_SEARCH_URL, params={"key": key}, headers=headers)
+    r.raise_for_status()
+    users = r.json()
+
+    result = {
+        "phones": [],
+        "registration_ids": [],
+        "emails": [],
+        "users": []
+    }
+
+    for u in users:
+        phone = u.get("phone")
+        if phone:
+            result["phones"].append(phone[3:] if phone.startswith("91-") else phone)
+        if u.get("registrationId"):
+            result["registration_ids"].append(u["registrationId"])
+        if u.get("email"):
+            result["emails"].append(u["email"])
+
+        result["users"].append({
+            "name": u.get("name"),
+            "email": u.get("email"),
+            "registrationId": u.get("registrationId"),
+            "phone": phone,
+            "userType": u.get("userType"),
+            "photo": convert_photo_url(u.get("photo"))
+        })
+
+    return jsonify(result)
+
+# --------------------------------------------------
 
 @app.route("/download", methods=["GET"])
 def download_file():
@@ -148,10 +172,9 @@ def download_file():
     }
 
     if filetype not in file_map:
-        return jsonify({"error": "Invalid file type"}), 400
+        return jsonify({"error": "Invalid type"}), 400
 
-    path = os.path.join(OUTPUT_DIR, file_map[filetype])
-    return send_file(path, as_attachment=True)
+    return send_file(os.path.join(OUTPUT_DIR, file_map[filetype]), as_attachment=True)
 
 # ================= MAIN =================
 if __name__ == "__main__":
